@@ -1,0 +1,73 @@
+:root {
+  /* custom colors
+  --text-color
+  --background-color
+  --accent-color 
+  */
+  --muted-text: color-mix(in srgb, var(--text-color) 60%, transparent);
+  --divider-color: color-mix(in srgb, var(--text-color) 10%, transparent);
+  --green: #0a0;
+  --red: #a00;
+  --blue: #00c;
+}
+
+/* reset.css */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  line-height: 1.5;
+}
+
+ul, ol {
+  list-style: none;
+}
+
+a {
+  text-decoration: none;
+  color: inherit; 
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+  display: block; 
+}
+
+button {
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+input, textarea, select {
+  font-family: inherit; 
+  font-size: inherit; 
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-weight: normal; 
+}
+
+blockquote {
+  quotes: none; 
+}
+
+blockquote:before, blockquote:after {
+  content: '';
+}
+
+hr {
+  border: none;
+  border-top: 1px solid var(--divider-color);
+  margin: 1em 0;
+}
+
