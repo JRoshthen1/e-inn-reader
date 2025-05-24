@@ -1,5 +1,5 @@
 // src/composables/useStyles.ts
-import { ref, watch } from 'vue';
+import { ref, watch, nextTick } from 'vue';
 import { type RenditionTheme, type StylesOptions } from '../types/styles';
 
 export function useStyles(options: StylesOptions = {}) {
@@ -11,6 +11,17 @@ export function useStyles(options: StylesOptions = {}) {
   const fontSize = ref(options.initialFontSize || '100%');
   const stylesModalOpen = ref(false);
   const rendition = ref<RenditionTheme | null>(null);
+  
+  // Font URLs for custom fonts
+  const customFonts = {
+    'Fast Sans': '/fonts/Fast_Sans.ttf',
+    'Fast Serif': '/fonts/Fast_Serif.ttf',
+    'Fast Mono': '/fonts/Fast_Mono.ttf',
+    'Fast Dotted': '/fonts/Fast_Sans_Dotted.ttf'
+  };
+  
+  // Track if hooks are registered to avoid duplicate registration
+  let hooksRegistered = false;
   
   // Local storage management
   const loadSavedStyles = () => {
@@ -50,21 +61,135 @@ export function useStyles(options: StylesOptions = {}) {
     setMeta('theme-color', backgroundColor.value);
   };
   
-  // Reader theme application
-  const applyStylesToReader = () => {
-    if (!rendition.value?.themes) return;
+  // Create CSS with font-face declarations for epub.js
+  const createFontFaceCSS = (): string => {
+    let fontCSS = '';
+    
+    for (const [fontName, fontUrl] of Object.entries(customFonts)) {
+      fontCSS += `
+        @font-face {
+          font-family: '${fontName}';
+          src: url('${fontUrl}') format('truetype');
+          font-display: swap;
+        }
+      `;
+    }
+    
+    return fontCSS;
+  };
+  
+  // Apply styles to a specific content document
+  const applyStylesToContent = (doc: Document) => {
+    const head = doc.head || doc.getElementsByTagName('head')[0];
+    if (!head) return;
+    
+    // Remove existing custom styles to avoid duplicates
+    const existingStyles = head.querySelectorAll('[data-custom-styles]');
+    existingStyles.forEach(style => style.remove());
+    
+    // Create and inject font styles
+    const fontStyle = doc.createElement('style');
+    fontStyle.setAttribute('data-custom-styles', 'fonts');
+    fontStyle.textContent = createFontFaceCSS();
+    head.appendChild(fontStyle);
+    
+    // Create and inject theme styles
+    const themeStyle = doc.createElement('style');
+    themeStyle.setAttribute('data-custom-styles', 'theme');
+    themeStyle.textContent = `
+      body, html {
+        color: ${textColor.value} !important;
+        background-color: ${backgroundColor.value} !important;
+        font-family: ${fontFamily.value} !important;
+        font-size: ${fontSize.value} !important;
+        transition: all 0.3s ease;
+      }
+      * {
+        color: inherit !important;
+        font-family: inherit !important;
+      }
+      p, div, span, h1, h2, h3, h4, h5, h6 {
+        color: ${textColor.value} !important;
+        font-family: ${fontFamily.value} !important;
+      }
+    `;
+    head.appendChild(themeStyle);
+  };
+  
+  // Apply styles to all currently loaded content
+  const applyStylesToAllContent = () => {
+    if (!rendition.value) return;
     
     try {
-      const { themes } = rendition.value;
-      themes.override('color', textColor.value);
-      themes.override('background', backgroundColor.value);
-      themes.override('font-family', fontFamily.value);
+      // Get all iframes (epub.js uses iframes for content)
+      const iframes = rendition.value.manager?.container?.querySelectorAll('iframe');
       
-      if (themes.fontSize) {
-        themes.fontSize(fontSize.value);
-      } else {
-        themes.override('font-size', fontSize.value);
+      if (iframes) {
+        iframes.forEach((iframe: HTMLIFrameElement) => {
+          try {
+            const doc = iframe.contentDocument || iframe.contentWindow?.document;
+            if (doc) {
+              applyStylesToContent(doc);
+            }
+          } catch (error) {
+            console.warn('Could not access iframe content:', error);
+          }
+        });
       }
+      
+      // Also try to get content through epub.js API
+      if (rendition.value.getContents) {
+        const contents = rendition.value.getContents();
+        contents.forEach((content: any) => {
+          if (content.document) {
+            applyStylesToContent(content.document);
+          }
+        });
+      }
+      
+    } catch (error) {
+      console.error('Error applying styles to all content:', error);
+    }
+  };
+  
+  const registerContentHooks = () => {
+    if (!rendition.value || hooksRegistered) return;
+    
+    try {
+      rendition.value.hooks.content.register((contents: any) => {
+        if (contents.document) {
+          applyStylesToContent(contents.document);
+        }
+      });
+      
+      hooksRegistered = true;
+    } catch (error) {
+      console.error('Error registering content hooks:', error);
+    }
+  };
+  
+  const applyStylesToReader = async () => {
+    if (!rendition.value) return;
+    
+    try {
+      if (rendition.value.themes) {
+        const { themes } = rendition.value;
+        
+        themes.override('color', textColor.value);
+        themes.override('background', backgroundColor.value);
+        themes.override('font-family', fontFamily.value);
+        
+        if (themes.fontSize) {
+          themes.fontSize(fontSize.value);
+        } else {
+          themes.override('font-size', fontSize.value);
+        }
+      }
+      
+      await nextTick();
+      applyStylesToAllContent();
+      registerContentHooks();
+      
     } catch (error) {
       console.error('Error applying styles to reader:', error);
     }
@@ -92,33 +217,58 @@ export function useStyles(options: StylesOptions = {}) {
     if (!tag.parentNode) document.head.appendChild(tag);
   };
 
-  // Rendition setup
-  const setRendition = (renditionObj: RenditionTheme): void => {
+  // Rendition setup (enhanced)
+  const setRendition = async (renditionObj: RenditionTheme): Promise<void> => {
     rendition.value = renditionObj;
-    applyStylesToReader();
+    hooksRegistered = false; // Reset hook registration flag
+    
+    // Wait for rendition to be ready
+    if (renditionObj.display) {
+      await renditionObj.display();
+    }
+    
+    // Apply styles after display
+    await applyStylesToReader();
   };
   
   const toggleStylesModal = () => {
     stylesModalOpen.value = !stylesModalOpen.value;
   };
   
-  // Watch for style changes
+  // Force refresh all styles (useful for debugging or manual refresh)
+  const refreshStyles = async () => {
+    await nextTick();
+    applyStylesToDocument();
+    await applyStylesToReader();
+  };
+  
+  // Watch for style changes with debouncing
+  let styleUpdateTimeout: NodeJS.Timeout | null = null;
+  
   watch(
     [textColor, backgroundColor, accentColor, fontFamily, fontSize],
-    () => {
-      applyStylesToDocument();
-      applyStylesToReader();
-      saveStyles();
-      
-      if (options.onStyleChange) {
-        options.onStyleChange(
-          textColor.value, 
-          backgroundColor.value, 
-          accentColor.value, 
-          fontFamily.value,
-          fontSize.value
-        );
+    async () => {
+      // Clear existing timeout
+      if (styleUpdateTimeout) {
+        clearTimeout(styleUpdateTimeout);
       }
+      
+      // Debounce style updates to avoid too frequent changes
+      styleUpdateTimeout = setTimeout(async () => {
+        applyStylesToDocument();
+        await applyStylesToReader();
+        saveStyles();
+        
+        if (options.onStyleChange) {
+          options.onStyleChange(
+            textColor.value, 
+            backgroundColor.value, 
+            accentColor.value, 
+            fontFamily.value,
+            fontSize.value
+          );
+        }
+      }, 100);
     }
   );
   
@@ -136,6 +286,7 @@ export function useStyles(options: StylesOptions = {}) {
     applyPreset,
     setRendition,
     applyStylesToReader,
-    applyStylesToDocument
+    applyStylesToDocument,
+    refreshStyles
   };
 }

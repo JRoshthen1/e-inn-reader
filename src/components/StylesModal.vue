@@ -195,7 +195,11 @@ export default defineComponent({
       { label: 'Times New Roman', value: 'Times New Roman, serif' },
       { label: 'Georgia', value: 'Georgia, serif' },
       { label: 'Verdana', value: 'Verdana, sans-serif' },
-      { label: 'Courier New', value: 'Courier New, monospace' }
+      { label: 'Courier New', value: 'Courier New, monospace' },
+      { label: 'Fast Sans', value: 'Fast Sans, sans-serif' },
+      { label: 'Fast Serif', value: 'Fast Serif, serif' },
+      { label: 'Fast Mono', value: 'Fast Mono, monospace' },
+      { label: 'Fast Dotted', value: 'Fast Dotted, sans-serif' },
     ];
     
     // Use custom presets if provided, else use defaults
