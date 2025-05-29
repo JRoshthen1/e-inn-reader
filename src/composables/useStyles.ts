@@ -1,6 +1,7 @@
 // src/composables/useStyles.ts
 import { ref, watch, nextTick } from 'vue';
-import { type RenditionTheme, type StylesOptions } from '../types/styles';
+import { type StylesOptions } from '../types/styles';
+import type Rendition from 'epubjs/types/rendition';
 
 export function useStyles(options: StylesOptions = {}) {
   // Initialize style refs with defaults or provided values
@@ -10,36 +11,45 @@ export function useStyles(options: StylesOptions = {}) {
   const fontFamily = ref(options.initialFontFamily || 'Arial, sans-serif');
   const fontSize = ref(options.initialFontSize || '100%');
   const stylesModalOpen = ref(false);
-  const rendition = ref<RenditionTheme | null>(null);
+  const rendition = ref<Rendition | null>(null);
   
   // Track if hooks are registered to avoid duplicate registration
   let hooksRegistered = false;
+  let renderedEventListener: ((section: any, view: any) => void) | null = null;
   
   // Local storage management
   const loadSavedStyles = () => {
-    const savedStyles = {
-      text: localStorage.getItem('reader-text-color'),
-      background: localStorage.getItem('reader-background-color'),
-      accent: localStorage.getItem('accent-color'),
-      fontFamily: localStorage.getItem('reader-font-family'),
-      fontSize: localStorage.getItem('reader-font-size')
-    };
-    
-    if (savedStyles.text) textColor.value = savedStyles.text;
-    if (savedStyles.background) backgroundColor.value = savedStyles.background;
-    if (savedStyles.accent) accentColor.value = savedStyles.accent;
-    if (savedStyles.fontFamily) fontFamily.value = savedStyles.fontFamily;
-    if (savedStyles.fontSize) fontSize.value = savedStyles.fontSize;
-    
-    applyStylesToDocument();
+    try {
+      const savedStyles = {
+        text: localStorage.getItem('reader-text-color'),
+        background: localStorage.getItem('reader-background-color'),
+        accent: localStorage.getItem('accent-color'),
+        fontFamily: localStorage.getItem('reader-font-family'),
+        fontSize: localStorage.getItem('reader-font-size')
+      };
+      
+      if (savedStyles.text) textColor.value = savedStyles.text;
+      if (savedStyles.background) backgroundColor.value = savedStyles.background;
+      if (savedStyles.accent) accentColor.value = savedStyles.accent;
+      if (savedStyles.fontFamily) fontFamily.value = savedStyles.fontFamily;
+      if (savedStyles.fontSize) fontSize.value = savedStyles.fontSize;
+      
+      applyStylesToDocument();
+    } catch (error) {
+      console.error('Error loading saved styles:', error);
+    }
   };
   
   const saveStyles = () => {
-    localStorage.setItem('reader-text-color', textColor.value);
-    localStorage.setItem('reader-background-color', backgroundColor.value);
-    localStorage.setItem('accent-color', accentColor.value);
-    localStorage.setItem('reader-font-family', fontFamily.value);
-    localStorage.setItem('reader-font-size', fontSize.value);
+    try {
+      localStorage.setItem('reader-text-color', textColor.value);
+      localStorage.setItem('reader-background-color', backgroundColor.value);
+      localStorage.setItem('accent-color', accentColor.value);
+      localStorage.setItem('reader-font-family', fontFamily.value);
+      localStorage.setItem('reader-font-size', fontSize.value);
+    } catch (error) {
+      console.error('Error saving styles:', error);
+    }
   };
   
   const applyStylesToDocument = () => {
@@ -121,39 +131,56 @@ export function useStyles(options: StylesOptions = {}) {
         color: ${textColor.value} !important;
         font-family: ${fontFamily.value} !important;
       }
+      ::selection {
+        background-color: ${accentColor.value}4D;
+        color: inherit;
+      }
+
+      ::-moz-selection {
+        background-color: ${accentColor.value}4D;
+        color: inherit;
+      }
     `;
     head.appendChild(themeStyle);
   };
   
-  // Apply styles to all currently loaded content
-  const applyStylesToAllContent = () => {
+  // Apply styles to all currently loaded content - IMPROVED VERSION
+  const applyStylesToAllContent = async () => {
     if (!rendition.value) return;
     
     try {
-      // Get all iframes (epub.js uses iframes for content)
-      const iframes = rendition.value.manager?.container?.querySelectorAll('iframe');
-      
-      if (iframes) {
-        iframes.forEach((iframe: HTMLIFrameElement) => {
-          try {
-            const doc = iframe.contentDocument || iframe.contentWindow?.document;
-            if (doc) {
-              applyStylesToContent(doc);
+      // Method 1: Use getContents() API (most reliable)
+      const contents = rendition.value.getContents();
+      if (contents) {
+        // Handle both single Contents object and array of Contents
+        const contentsArray = Array.isArray(contents) ? contents : [contents];
+        
+        await Promise.all(
+          contentsArray.map(async (content: any) => {
+            if (content && content.document) {
+              await nextTick(); // Ensure DOM is ready
+              applyStylesToContent(content.document);
             }
-          } catch (error) {
-            console.warn('Could not access iframe content:', error);
-          }
-        });
+          })
+        );
       }
       
-      // Also try to get content through epub.js API
-      if (rendition.value.getContents) {
-        const contents = rendition.value.getContents();
-        contents.forEach((content: any) => {
-          if (content.document) {
-            applyStylesToContent(content.document);
-          }
-        });
+      // Method 2: Use views() as fallback
+      const views = rendition.value.views();
+      if (views && Array.isArray(views)) {
+        await Promise.all(
+          views.map(async (view: any) => {
+            try {
+              const doc = view.document || view.iframe?.contentDocument;
+              if (doc) {
+                await nextTick();
+                applyStylesToContent(doc);
+              }
+            } catch (error) {
+              console.warn('Could not access view content:', error);
+            }
+          })
+        );
       }
       
     } catch (error) {
@@ -161,12 +188,56 @@ export function useStyles(options: StylesOptions = {}) {
     }
   };
   
+  // Setup event listeners for automatic style application
+  const setupEventListeners = () => {
+    if (!rendition.value || renderedEventListener) return;
+    
+    try {
+      // Create event listener function
+      renderedEventListener = async (section: any, view: any) => {
+        try {
+          if (view && view.document) {
+            await nextTick();
+            applyStylesToContent(view.document);
+          }
+        } catch (error) {
+          console.warn('Could not apply styles to rendered content:', error);
+        }
+      };
+      
+      // Register event listener
+      rendition.value.on('rendered', renderedEventListener);
+      
+      // Also listen for display events
+      rendition.value.on('displayed', async (section: any) => {
+        await nextTick();
+        await applyStylesToAllContent();
+      });
+      
+    } catch (error) {
+      console.error('Error setting up event listeners:', error);
+    }
+  };
+  
+  // Remove event listeners when cleaning up
+  const removeEventListeners = () => {
+    if (!rendition.value || !renderedEventListener) return;
+    
+    try {
+      rendition.value.off('rendered', renderedEventListener);
+      renderedEventListener = null;
+    } catch (error) {
+      console.error('Error removing event listeners:', error);
+    }
+  };
+  
   const registerContentHooks = () => {
     if (!rendition.value || hooksRegistered) return;
     
     try {
-      rendition.value.hooks.content.register((contents: any) => {
+      rendition.value.hooks.content.register(async (contents: any) => {
         if (contents.document) {
+          await nextTick();
           applyStylesToContent(contents.document);
         }
       });
@@ -181,30 +252,37 @@ export function useStyles(options: StylesOptions = {}) {
     if (!rendition.value) return;
     
     try {
-      if (rendition.value.themes) {
-        const { themes } = rendition.value;
-        
+      const { themes } = rendition.value;
+      
+      if (themes) {
+        // Apply theme overrides
         themes.override('color', textColor.value);
         themes.override('background', backgroundColor.value);
         themes.override('font-family', fontFamily.value);
         
-        if (themes.fontSize) {
+        // Use fontSize method if available, otherwise use override
+        if (typeof themes.fontSize === 'function') {
           themes.fontSize(fontSize.value);
         } else {
           themes.override('font-size', fontSize.value);
         }
       }
       
+      // Wait for next tick to ensure themes are applied
       await nextTick();
-      applyStylesToAllContent();
+      
+      // Apply styles to all current content
+      await applyStylesToAllContent();
+      
+      // Setup hooks and event listeners for future content
       registerContentHooks();
+      setupEventListeners();
       
     } catch (error) {
       console.error('Error applying styles to reader:', error);
     }
   };
   
-
   // Update status bar meta tags
   const setMeta = (name: string, content: string) => {
     let tag = document.querySelector(`meta[name="${name}"]`) as HTMLMetaElement || document.createElement('meta');
@@ -213,18 +291,36 @@ export function useStyles(options: StylesOptions = {}) {
     if (!tag.parentNode) document.head.appendChild(tag);
   };
 
-  // Rendition setup (enhanced)
-  const setRendition = async (renditionObj: RenditionTheme): Promise<void> => {
+  // Rendition setup - IMPROVED VERSION
+  const setRendition = async (renditionObj: Rendition): Promise<void> => {
+    // Clean up previous rendition
+    if (rendition.value) {
+      removeEventListeners();
+      hooksRegistered = false;
+    }
+    
     rendition.value = renditionObj;
     hooksRegistered = false; // Reset hook registration flag
     
-    // Wait for rendition to be ready
-    if (renditionObj.display) {
-      await renditionObj.display();
+    try {
+      // Wait for rendition to be ready if it has a started promise
+      if (renditionObj.started) {
+        await renditionObj.started;
+      }
+      
+      // Wait for initial display if display method exists
+      if (renditionObj.display) {
+        await renditionObj.display();
+      }
+      
+      // Apply styles after everything is ready
+      await applyStylesToReader();
+      
+    } catch (error) {
+      console.error('Error setting up rendition:', error);
+      // Still try to apply styles even if setup partially failed
+      await applyStylesToReader();
     }
-    
-    // Apply styles after display
-    await applyStylesToReader();
   };
   
   const toggleStylesModal = () => {
@@ -233,13 +329,17 @@ export function useStyles(options: StylesOptions = {}) {
   
   // Force refresh all styles (useful for debugging or manual refresh)
   const refreshStyles = async () => {
-    await nextTick();
-    applyStylesToDocument();
-    await applyStylesToReader();
+    try {
+      await nextTick();
+      applyStylesToDocument();
+      await applyStylesToReader();
+    } catch (error) {
+      console.error('Error refreshing styles:', error);
+    }
   };
   
-  // Watch for style changes with debouncing
-  let styleUpdateTimeout: NodeJS.Timeout | null = null;
+  // Watch for style changes with debouncing - IMPROVED VERSION
+  let styleUpdateTimeout: ReturnType<typeof setTimeout> | null = null;
   
   watch(
     [textColor, backgroundColor, accentColor, fontFamily, fontSize],
@@ -251,24 +351,37 @@ export function useStyles(options: StylesOptions = {}) {
       
       // Debounce style updates to avoid too frequent changes
       styleUpdateTimeout = setTimeout(async () => {
-        applyStylesToDocument();
-        await applyStylesToReader();
-        saveStyles();
-        
-        if (options.onStyleChange) {
-          options.onStyleChange(
-            textColor.value, 
-            backgroundColor.value, 
-            accentColor.value, 
-            fontFamily.value,
-            fontSize.value
-          );
+        try {
+          applyStylesToDocument();
+          await applyStylesToReader();
+          saveStyles();
+          
+          if (options.onStyleChange) {
+            options.onStyleChange(
+              textColor.value, 
+              backgroundColor.value, 
+              accentColor.value, 
+              fontFamily.value,
+              fontSize.value
+            );
+          }
+        } catch (error) {
+          console.error('Error updating styles:', error);
         }
-      }, 100);
+      }, 150); // Slightly increased debounce time for better performance
     }
   );
   
+  // Load saved styles on initialization
   loadSavedStyles();
+  
+  // Cleanup function
+  const cleanup = () => {
+    removeEventListeners();
+    if (styleUpdateTimeout) {
+      clearTimeout(styleUpdateTimeout);
+    }
+  };
   
   return {
     textColor,
@@ -282,6 +395,7 @@ export function useStyles(options: StylesOptions = {}) {
     setRendition,
     applyStylesToReader,
     applyStylesToDocument,
-    refreshStyles
+    refreshStyles,
+    cleanup
   };
 }
