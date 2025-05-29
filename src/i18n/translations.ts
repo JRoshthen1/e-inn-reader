@@ -1,0 +1,91 @@
+// src/i18n/translations.ts
+export const translations = {
+    en: {
+      library: {
+        library: 'Library',
+        title: 'Title',
+        emptyLibrary: 'No books found in the library.',
+        loading: 'Loading your library...',
+        download: 'Download',
+        read: 'Read',
+        size: 'Size',
+        local: 'Owned',
+        added: 'Added',
+        filename: 'File name',
+      },
+      reader: {
+        loading: 'Loading',
+        back: 'Back',
+      },
+      settings: {
+        settings: 'Settings',
+        textColor: 'Text Color',
+        backgroundColor: 'Background Color',
+        accentColor: 'Accent Color',
+        fontFamily: 'Font',
+        fontSize: "Font Size",
+        presets: 'Presets',
+        white: 'Light',
+        black: 'Dark',
+        sepia: 'Sepia',
+        bookSettings: 'Book Settings',
+        saveChanges: 'Save Changes',
+        deleteBook: 'Delete Book',
+        confirmDelete: 'Are you sure you want to delete this book? This action is irreversible!',
+        cancel: 'Cancel',
+        delete: 'Delete'
+      },
+      messages: {
+        success: 'Operation completed successfully',
+        error: 'An error occurred',
+        loading: 'Loading...',
+        confirmDelete: 'Are you sure you want to delete ',
+        noResults: 'No results found',
+        welcome: 'Welcome!'
+      },
+    },
+    sk: {
+      library: {
+        library: 'Knižnica',
+        title: 'Názov',
+        emptyLibrary: 'V knižnici sa nenašli žiadne knihy.',
+        loading: 'Načítavam Vašu knižnicu...',
+        download: 'Stiahnuť',
+        read: 'Čítať',
+        size: 'Veľkosť',
+        local: 'Moje',
+        added: 'Pridané',
+        filename: 'Názov súboru',
+      },
+      reader: {
+        loading: 'Načítavam',
+        back: 'Späť',
+      },
+      settings: {
+        settings: 'Nastavenia',
+        textColor: 'Farba Textu',
+        backgroundColor: 'Farba Pozadia',
+        accentColor: 'Terciárna Farba',
+        fontFamily: 'Písmo',
+        fontSize: "Veľkosť písma",
+        presets: 'Predvoľby',
+        white: 'Svetlá',
+        black: 'Tmavá',
+        sepia: 'Sépia',
+        bookSettings: 'Detail Knihy',
+        saveChanges: 'Uložiť zmeny',
+        deleteBook: 'Odstrániť Knihu',
+        confirmDelete: 'Naozaj chcete odstrániť ',
+        cancel: 'Zrušiť',
+        delete: 'Odstrániť'
+      },
+      messages: {
+        success: 'Operácia bola úspešne dokončená',
+        error: 'Došlo k chybe',
+        loading: 'Načítava sa...',
+        confirmDelete: 'Naozaj chcete zmazať túto položku?',
+        noResults: 'Nenašli sa žiadne výsledky',
+        welcome: 'Vitajte!'
+      },
+    },
+  };

@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  dev:
+    image: node:alpine
+    working_dir: /app
+    volumes:
+      - ./:/app
+    ports:
+      - "${VITE_PORT}:${VITE_PORT}"
+    command: sh -c "npm install && npm run dev"
+
+  build:
+    image: node:alpine
+    working_dir: /app
+    volumes:
+      - ./:/app
+    command: sh -c "rm -rf dist/ && npm install && npm run build-only"
