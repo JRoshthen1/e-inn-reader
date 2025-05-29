@@ -1,4 +1,41 @@
-@import './base.css';
+@import './reset.css';
+
+ @font-face {
+  font-family: 'Fast Sans';
+  src: url('/e-inn-reader/fonts/Fast_Sans.ttf') format('truetype');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Fast Serif';
+  src: url('/e-inn-reader/fonts/Fast_Serif.ttf') format('truetype');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Fast Mono';
+  src: url('/e-inn-reader/fonts/Fast_Mono.ttf') format('truetype');
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Fast Dotted';
+  src: url('/e-inn-reader/fonts/Fast_Sans_Dotted.ttf') format('truetype');
+  font-display: swap;
+}
+
+:root {
+  /* User defined colors
+  --text-color
+  --background-color
+  --accent-color 
+  */
+  --muted-text: color-mix(in srgb, var(--text-color) 60%, transparent);
+  --divider-color: color-mix(in srgb, var(--text-color) 10%, transparent);
+  --green: #0a0;
+  --red: #a00;
+  --blue: #00c;
+}
 
 #app{
   width: 100%;

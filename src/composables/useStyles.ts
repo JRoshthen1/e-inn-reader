@@ -1,5 +1,5 @@
 // src/composables/useStyles.ts
-import { ref, watch, nextTick, computed } from 'vue';
+import { ref, watch, nextTick } from 'vue';
 import { type RenditionTheme, type StylesOptions } from '../types/styles';
 
 export function useStyles(options: StylesOptions = {}) {
@@ -11,16 +11,6 @@ export function useStyles(options: StylesOptions = {}) {
   const fontSize = ref(options.initialFontSize || '100%');
   const stylesModalOpen = ref(false);
   const rendition = ref<RenditionTheme | null>(null);
-  
-  const baseUrl = computed(() => {
-    return import.meta.env.VITE_BASE_URL;
-  });
-  const customFonts = {
-    'Fast Sans': `${baseUrl}fonts/Fast_Sans.ttf`,
-    'Fast Serif': `${baseUrl}fonts/Fast_Serif.ttf`,
-    'Fast Mono': `${baseUrl}fonts/Fast_Mono.ttf`,
-    'Fast Dotted': `${baseUrl}fonts/Fast_Sans_Dotted.ttf`
-  };
   
   // Track if hooks are registered to avoid duplicate registration
   let hooksRegistered = false;
@@ -63,21 +53,42 @@ export function useStyles(options: StylesOptions = {}) {
     setMeta('theme-color', backgroundColor.value);
   };
   
-  // Create CSS with font-face declarations for epub.js
-  const createFontFaceCSS = (): string => {
-    let fontCSS = '';
+  // Import stylesheets from document to iframe
+  const importDocumentStylesheets = (doc: Document) => {
+    // Skip if already imported
+    if (doc.querySelector('[data-imported-stylesheets]')) return;
     
-    for (const [fontName, fontUrl] of Object.entries(customFonts)) {
-      fontCSS += `
-        @font-face {
-          font-family: '${fontName}';
-          src: url('${fontUrl}') format('truetype');
-          font-display: swap;
+    // Create marker to avoid duplicates
+    const markerStyle = doc.createElement('style');
+    markerStyle.setAttribute('data-imported-stylesheets', 'true');
+    markerStyle.textContent = '/* Stylesheets imported */';
+    doc.head.appendChild(markerStyle);
+    
+    const mainStylesheets = Array.from(document.styleSheets);
+
+    // Check each stylesheet for font-face rules and copy them
+    let fontFaceCss = '';
+    mainStylesheets.forEach(stylesheet => {
+      try {
+        // Access rules safely (might throw error for cross-origin sheets)
+        const rules = stylesheet.cssRules || stylesheet.rules;
+        if (!rules) return;
+        
+        for (let i = 0; i < rules.length; i++) {
+          const rule = rules[i];
+          if (rule.constructor.name === 'CSSFontFaceRule') {
+            fontFaceCss += rule.cssText + '\n';
+          }
         }
-      `;
-    }
+      } catch (e) {} // Silently ignore cross-origin stylesheet errors
+    });
     
-    return fontCSS;
+    if (fontFaceCss) {
+      const fontStyle = doc.createElement('style');
+      fontStyle.setAttribute('data-custom-styles', 'imported-fonts');
+      fontStyle.textContent = fontFaceCss;
+      doc.head.appendChild(fontStyle);
+    }
   };
   
   // Apply styles to a specific content document
@@ -85,15 +96,11 @@ export function useStyles(options: StylesOptions = {}) {
     const head = doc.head || doc.getElementsByTagName('head')[0];
     if (!head) return;
     
-    // Remove existing custom styles to avoid duplicates
-    const existingStyles = head.querySelectorAll('[data-custom-styles]');
+    // Remove existing theme styles to avoid duplicates
+    const existingStyles = head.querySelectorAll('[data-custom-styles="theme"]');
     existingStyles.forEach(style => style.remove());
     
-    // Create and inject font styles
-    const fontStyle = doc.createElement('style');
-    fontStyle.setAttribute('data-custom-styles', 'fonts');
-    fontStyle.textContent = createFontFaceCSS();
-    head.appendChild(fontStyle);
+    importDocumentStylesheets(doc);
     
     // Create and inject theme styles
     const themeStyle = doc.createElement('style');

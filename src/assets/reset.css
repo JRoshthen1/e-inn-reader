@@ -1,16 +1,3 @@
-:root {
-  /* custom colors
-  --text-color
-  --background-color
-  --accent-color 
-  */
-  --muted-text: color-mix(in srgb, var(--text-color) 60%, transparent);
-  --divider-color: color-mix(in srgb, var(--text-color) 10%, transparent);
-  --green: #0a0;
-  --red: #a00;
-  --blue: #00c;
-}
-
 /* reset.css */
 * {
   margin: 0;

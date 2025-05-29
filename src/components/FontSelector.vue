@@ -46,8 +46,14 @@ export default defineComponent({
   },
   emits: ['update:modelValue'],
   setup(props, { emit }) {
-    // Default font options if none provided
     const defaultFonts: FontOption[] = [
+      // Custom Fast fonts https://github.com/Born2Root/Fast-Font
+      { label: 'Fast Sans', value: '"Fast Sans", sans-serif' },
+      { label: 'Fast Serif', value: '"Fast Serif", serif' },
+      { label: 'Fast Mono', value: '"Fast Mono", monospace' },
+      { label: 'Fast Dotted', value: '"Fast Dotted", sans-serif' },
+      
+      // Standard system fonts
       { label: 'Arial', value: 'Arial, sans-serif' },
       { label: 'Times New Roman', value: 'Times New Roman, serif' },
       { label: 'Georgia', value: 'Georgia, serif' },
