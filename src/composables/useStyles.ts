@@ -1,5 +1,5 @@
 // src/composables/useStyles.ts
-import { ref, watch, nextTick } from 'vue';
+import { ref, watch, nextTick, computed } from 'vue';
 import { type RenditionTheme, type StylesOptions } from '../types/styles';
 
 export function useStyles(options: StylesOptions = {}) {
@@ -12,8 +12,9 @@ export function useStyles(options: StylesOptions = {}) {
   const stylesModalOpen = ref(false);
   const rendition = ref<RenditionTheme | null>(null);
   
-  const baseUrl = import.meta.env.VITE_BASE_URL;
-
+  const baseUrl = computed(() => {
+    return import.meta.env.VITE_BASE_URL;
+  });
   const customFonts = {
     'Fast Sans': `${baseUrl}fonts/Fast_Sans.ttf`,
     'Fast Serif': `${baseUrl}fonts/Fast_Serif.ttf`,
