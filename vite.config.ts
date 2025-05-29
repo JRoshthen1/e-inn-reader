@@ -7,7 +7,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd())
 
   return {
-    base: String(env.VITE_BASE_URL),
+    base: '/e-inn-reader/',
     plugins: [
       vue(),
       //vueDevTools(),
