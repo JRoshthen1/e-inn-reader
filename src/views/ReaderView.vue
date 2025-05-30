@@ -1,4 +1,3 @@
-<!-- ReaderView.vue (Updated with separated components) -->
 <template>
   <div class="reader-container">
     <div 
@@ -39,11 +38,8 @@
           @update:location="locationChange"
           :tocChanged="onTocChange"
           :getRendition="getRendition"
+          :toggleBubble="toggleSelectionBubble"
         />
-      <!--:epubOptions="{
-            flow: 'scrolled',
-            manager: 'continuous',
-          }" -->
       </div>
     </div>
 
@@ -59,7 +55,7 @@
       <div v-if="expandedToc" class="toc-background" @click="toggleToc"></div>
     </div>
 
-    <!-- Annotations Panel (imported component) -->
+    <!-- Annotations Panel -->
     <AnnotationsPanel
       :annotations="savedAnnotations"
       :is-visible="showAnnotationsPanel"
@@ -69,7 +65,7 @@
       @delete="deleteAnnotation"
     />
 
-    <!-- Annotation Modal (imported component) -->
+    <!-- Annotation Modal -->
     <AnnotationModal
       :is-open="showAnnotationModal"
       :selected-text="pendingAnnotation?.text || ''"
@@ -80,6 +76,7 @@
       @save="handleAnnotationSave"
     />
 
+    <!-- Styles Modal -->
     <StylesModal
       v-model:text-color="textColor"
       v-model:background-color="backgroundColor"
@@ -95,21 +92,21 @@
 
 <script setup lang="ts">
 import {
-  ref, reactive, onMounted, onUnmounted, toRefs, h,
-  getCurrentInstance, Transition, nextTick
+  ref, reactive, onMounted, onUnmounted, toRefs, watch, nextTick
 } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "../i18n/usei18n";
+import EpubView from "../components/EpubView.vue";
 import StylesModal from "../components/StylesModal.vue";
 import StylesButton from "../components/StylesButton.vue";
 import AnnotationsPanel from "../components/AnnotationsPanel.vue";
 import AnnotationModal from "../components/AnnotationModal.vue";
 import AnnotationsButton from "../components/AnnotationsButton.vue";
+import TocComponent from "../components/TocComponent.vue";
 import { useStyles } from "../composables/useStyles";
 import { loadBookFromIndexedDB } from "../utils/utils";
-import EpubView from "../components/EpubView.vue";
-import { type EpubFile } from "../types/epubFile";
-import { type Annotation, type PendingAnnotation, type AnnotationFormData } from "../types/annotations";
+import type { EpubFile } from "../types/epubFile";
+import type { Annotation, PendingAnnotation, AnnotationFormData } from "../types/annotations";
 
 // Import epub.js types
 import type Rendition from 'epubjs/types/rendition';
@@ -135,75 +132,6 @@ interface RelocatedEvent {
   atEnd: boolean;
 }
 
-// TocComponent definition
-const TocComponent = (props: {
-  toc: Array<ExtendedNavItem>;
-  current: string | number;
-  setLocation: (href: string | number, close?: boolean) => void;
-  isSubmenu?: boolean;
-}) => {
-  const vm = getCurrentInstance();
-  const renderH = h.bind(vm);
-
-  return renderH(
-    "div",
-    null,
-    props.toc.map((item, index) => {
-      return renderH("div", { key: index }, [
-        renderH(
-          "button",
-          {
-            class: [
-              "toc-area-button",
-              item.href === props.current ? "active" : "",
-            ],
-            onClick: () => {
-              if (item.subitems.length > 0) {
-                item.expansion = !item.expansion;
-                props.setLocation(item.href, false);
-              } else {
-                props.setLocation(item.href);
-              }
-            },
-          },
-          [
-            props.isSubmenu ? " ".repeat(4) + item.label : item.label,
-            item.subitems.length > 0 &&
-              renderH("div", {
-                class: `${item.expansion ? "open" : ""} expansion`,
-              }),
-          ]
-        ),
-        // Nested TOC
-        item.subitems.length > 0 &&
-          renderH(
-            Transition,
-            { name: "collapse-transition" },
-            {
-              default: () =>
-                renderH(
-                  "div",
-                  {
-                    style: {
-                      display: item.expansion ? undefined : "none",
-                    },
-                  },
-                  [
-                    renderH(TocComponent, {
-                      toc: item.subitems,
-                      current: props.current,
-                      setLocation: props.setLocation,
-                      isSubmenu: true,
-                    }),
-                  ]
-                ),
-            }
-          ),
-      ]);
-    })
-  );
-};
-
 // Setup state
 const { t } = useI18n();
 const route = useRoute();
@@ -218,6 +146,13 @@ const firstRenderDone = ref<boolean>(false);
 const showToc = ref<boolean>(true);
 const epubRef = ref<InstanceType<typeof EpubView> | null>(null);
 const currentHref = ref<string | number | null>(null);
+
+const selectionBubble = reactive({
+  visible: false,
+  position: { left: '0px', top: '0px', width: '0px', height: '0px' },
+  selectedText: '',
+  cfiRange: ''
+});
 
 // Annotation state
 const savedAnnotations = ref<Annotation[]>([]);
@@ -235,15 +170,167 @@ const bookState = reactive({
 });
 const { toc, expandedToc } = toRefs(bookState);
 
+// Styles and rendition
 const {
   textColor, backgroundColor, accentColor,
   fontFamily, fontSize, stylesModalOpen,
   toggleStylesModal, rendition, setRendition,
 } = useStyles();
 
-// Toggle annotations panel
-const toggleAnnotationsPanel = () => {
-  showAnnotationsPanel.value = !showAnnotationsPanel.value;
+const BookProgressManager = {
+  saveProgress(bookId: string, cfi: string, extraData = {}) {
+    try {
+      const progressKey = `book-progress-${bookId}`;
+      const data = {
+        cfi,
+        timestamp: Date.now(),
+        ...extraData
+      };
+      localStorage.setItem(progressKey, JSON.stringify(data));
+      console.log(`Progress saved for book ${bookId}:`, data);
+      return true;
+    } catch (error) {
+      console.error('Error saving book progress:', error);
+      return false;
+    }
+  },
+
+  loadProgress(bookId: string) {
+    try {
+      const progressKey = `book-progress-${bookId}`;
+      const data = localStorage.getItem(progressKey);
+      
+      if (!data) return null;
+      
+      const parsed = JSON.parse(data);
+      //console.log(`Progress loaded for book ${bookId}:`, parsed);
+      return parsed;
+    } catch (error) {
+      console.error('Error loading book progress:', error);
+      return null;
+    }
+  },
+
+  clearProgress(bookId: string) {
+    const progressKey = `book-progress-${bookId}`;
+    localStorage.removeItem(progressKey);
+  }
+};
+
+// The custom selection bubble toggle function to pass to EpubView
+const toggleSelectionBubble = (type, rect, text, cfiRange) => {
+  if (type === 'selected' && text && text.length > 0) {
+    selectionBubble.visible = true;
+    selectionBubble.position = rect;
+    selectionBubble.selectedText = text;
+    selectionBubble.cfiRange = cfiRange;
+    
+    // Create pending annotation to be used when the user wants to save
+    pendingAnnotation.value = {
+      cfiRange,
+      text,
+      contents: rendition.value.getContents()[0]
+    };
+    
+    // Show annotation modal directly
+    showAnnotationModal.value = true;
+    
+    // Clear any selection after capturing it
+    if (rendition.value) {
+      const contents = rendition.value.getContents();
+      contents.forEach(content => {
+        if (content.window && content.window.getSelection) {
+          content.window.getSelection()?.removeAllRanges();
+        }
+      });
+    }
+  } else if (type === 'cleared') {
+    selectionBubble.visible = false;
+  }
+};
+
+const loadBook = async (): Promise<void> => {
+  loading.value = true;
+  error.value = null;
+
+  try {
+    const bookId = route.params.bookId as string;
+    if (!bookId) throw new Error("No book ID provided.");
+
+    const book: EpubFile = await loadBookFromIndexedDB(bookId);
+
+    // Load book data
+    if (book.data instanceof Blob) {
+      bookData.value = await book.data.arrayBuffer();
+      const blob = new Blob([bookData.value]);
+      bookDataUrl.value = URL.createObjectURL(blob);
+    } else if (book.data instanceof ArrayBuffer) {
+      bookData.value = book.data;
+      const blob = new Blob([bookData.value]);
+      bookDataUrl.value = URL.createObjectURL(blob);
+    } else {
+      throw new Error("Book data is in an unsupported format");
+    }
+
+    // Load progress after book data is ready
+    const progress = BookProgressManager.loadProgress(bookId);
+    if (progress && progress.cfi) {
+      location.value = progress.cfi;
+      //console.log("Setting initial location from localStorage:", location.value);
+    }
+
+    loadAnnotations();
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    console.error("Error loading book:", err);
+    error.value = `Failed to load the book. ${errorMsg}`;
+  } finally {
+    loading.value = false;
+  }
+};
+
+// Handle location changes
+const locationChange = (epubcifi: string): void => {
+  // Skip saving the location on the first render to prevent
+  // overriding our saved location
+  if (!firstRenderDone.value) {
+    //console.log("## first render");
+    firstRenderDone.value = true;
+    return;
+  }
+  
+  // Only save valid locations with epubcfi format
+  if (epubcifi && epubcifi.includes('epubcfi')) {
+    const bookId = route.params.bookId as string;
+    
+    BookProgressManager.saveProgress(bookId, epubcifi, {
+      chapter: currentHref.value?.toString()
+    });
+    
+    location.value = epubcifi;
+  }
+};
+
+const getRendition = (renditionObj: Rendition): void => {
+  setRendition(renditionObj);
+
+  renditionObj.on("relocated", (location: RelocatedEvent) => {
+    currentHref.value = location.start.href;
+  });
+
+  nextTick(() => {
+    applyAnnotationsToView();
+  });
+
+  // Get book metadata
+  const book: Book = renditionObj.book;
+  book.ready.then(() => {
+    const meta = book.packaging?.metadata;
+    if (!bookTitle.value && meta?.title) {
+      bookTitle.value = meta.title;
+      document.title = meta.title;
+    }
+  });
 };
 
 // Annotation storage functions
@@ -275,56 +362,6 @@ const saveAnnotationsToStorage = (): void => {
   } catch (error) {
     console.error('Error saving annotations:', error);
   }
-};
-
-const generateAnnotationId = (): string => {
-  return `annotation-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-};
-
-const loadBook = async (): Promise<void> => {
-  loading.value = true;
-  error.value = null;
-
-  try {
-    const bookId = route.params.bookId as string;
-    if (!bookId) throw new Error("No book ID provided.");
-
-    const book: EpubFile = await loadBookFromIndexedDB(bookId);
-
-    const progressKey = `book-progress-${bookId}`;
-    const savedLocation = localStorage.getItem(progressKey);
-    if (savedLocation) location.value = savedLocation;
-
-    if (book.data instanceof Blob) {
-      bookData.value = await book.data.arrayBuffer();
-      const blob = new Blob([bookData.value]);
-      bookDataUrl.value = URL.createObjectURL(blob);
-    } else if (book.data instanceof ArrayBuffer) {
-      bookData.value = book.data;
-      const blob = new Blob([bookData.value]);
-      bookDataUrl.value = URL.createObjectURL(blob);
-    } else {
-      throw new Error("Book data is in an unsupported format");
-    }
-
-    loadAnnotations();
-  } catch (err: unknown) {
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    console.error("Error loading book:", err);
-    error.value = `Failed to load the book. ${errorMsg}`;
-  } finally {
-    loading.value = false;
-  }
-};
-
-const locationChange = (epubcifi: string): void => {
-  if (!firstRenderDone.value) {
-    firstRenderDone.value = true;
-    return;
-  }
-  const bookId = route.params.bookId as string;
-  localStorage.setItem(`book-progress-${bookId}`, epubcifi);
-  location.value = epubcifi;
 };
 
 // Apply annotations to view
@@ -360,35 +397,6 @@ const applyAnnotationsToView = async (): Promise<void> => {
     }, 500);
   } catch (error) {
     console.error('Error applying annotations:', error);
-  }
-};
-
-// Handle text selection
-const handleSelection = (cfiRange: string, contents: Contents): void => {
-  try {
-    if (!rendition.value) return;
-    
-    const range = rendition.value.getRange(cfiRange);
-    const selectedText = range.toString().trim();
-    
-    if (!selectedText || selectedText.length < 3) {
-      console.log('Selection too short, ignoring');
-      return;
-    }
-    
-    pendingAnnotation.value = {
-      cfiRange,
-      text: selectedText,
-      contents
-    };
-    
-    showAnnotationModal.value = true;
-    
-    if (contents.window && contents.window.getSelection) {
-      contents.window.getSelection()?.removeAllRanges();
-    }
-  } catch (error) {
-    console.error('Error handling selection:', error);
   }
 };
 
@@ -446,7 +454,8 @@ const handleAnnotationSave = (formData: AnnotationFormData): void => {
         }
       );
     }
-saveAnnotationsToStorage();
+    
+    saveAnnotationsToStorage();
     closeAnnotationModal();
     
     // Show the annotations panel after creating a new annotation
@@ -465,6 +474,11 @@ const closeAnnotationModal = (): void => {
   annotationName.value = '';
   annotationNote.value = '';
   editingAnnotation.value = null;
+};
+
+// Generate annotation ID
+const generateAnnotationId = (): string => {
+  return `annotation-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 };
 
 // Go to annotation
@@ -509,39 +523,7 @@ const deleteAnnotation = (annotationId: string): void => {
   }
 };
 
-const getRendition = (renditionObj: Rendition): void => {
-  setRendition(renditionObj);
-
-  // Track current location for TOC highlighting
-  renditionObj.on("relocated", (location: RelocatedEvent) => {
-    currentHref.value = location.start.href;
-  });
-
-  // Handle text selection
-  renditionObj.on('selected', (cfiRange: string, contents: Contents) => {
-    handleSelection(cfiRange, contents);
-  });
-
-  // Apply saved annotations when view is displayed
-  renditionObj.on('displayed', () => {
-    applyAnnotationsToView();
-  });
-
-  // Get book metadata
-  const book: Book = renditionObj.book;
-  book.ready.then(() => {
-    const meta = book.packaging?.metadata;
-    if (!bookTitle.value && meta?.title) {
-      bookTitle.value = meta.title;
-      document.title = meta.title;
-    }
-  });
-};
-
-const goBack = (): void => {
-  router.push("/");
-};
-
+// Toggle TOC panel
 const toggleToc = (): void => {
   expandedToc.value = !expandedToc.value;
   if (expandedToc.value) {
@@ -551,6 +533,12 @@ const toggleToc = (): void => {
   }
 };
 
+// Toggle annotations panel
+const toggleAnnotationsPanel = () => {
+  showAnnotationsPanel.value = !showAnnotationsPanel.value;
+};
+
+// Handle key events
 const handleKeyDown = (event: KeyboardEvent) => {
   if (event.key === 'Escape') {
     if (showAnnotationModal.value) {
@@ -595,23 +583,33 @@ const setLocation = (
   expandedToc.value = !close;
 };
 
-// XHR Progress tracking
-const originalOpen = XMLHttpRequest.prototype.open;
-const onProgress = (e: ProgressEvent) => {
-  // Progress tracking if needed
-};
-
-XMLHttpRequest.prototype.open = function (
-  method: string,
-  requestUrl: string | URL
-) {
-  if (bookDataUrl.value && requestUrl.toString() === bookDataUrl.value) {
-    this.addEventListener("progress", onProgress);
+const debugStoredLocation = () => {
+  const bookId = route.params.bookId as string;
+  const progressKey = `book-progress-${bookId}`;
+  const savedLocation = localStorage.getItem(progressKey);
+  
+  console.log('================ DEBUG INFO ================');
+  console.log('Book ID:', bookId);
+  console.log('Progress key:', progressKey);
+  console.log('Saved location in localStorage:', savedLocation);
+  
+  // Check if the location format is valid
+  if (savedLocation) {
+    try {
+      const parsed = JSON.parse(savedLocation);
+      console.log('Parsed location:', parsed);
+      console.log('Is valid CFI format:', typeof parsed.cfi === 'string' && parsed.cfi.includes('epubcfi'));
+    } catch (e) {
+      console.log('Raw location string:', savedLocation);
+      console.log('Is valid CFI format:', savedLocation.includes('epubcfi'));
+    }
   }
-  originalOpen.apply(this, arguments as any);
+  
+  console.log('=========================================');
 };
 
 onMounted(() => {
+ // debugStoredLocation();
   loadBook();
   
   // Add keyboard shortcuts
@@ -623,7 +621,6 @@ onUnmounted(() => {
     URL.revokeObjectURL(bookDataUrl.value);
   }
   
-  XMLHttpRequest.prototype.open = originalOpen;
   window.removeEventListener('keydown', handleKeyDown);
 });
 
@@ -634,7 +631,6 @@ defineExpose({
   bookData,
   bookTitle,
   location,
-  goBack,
   locationChange,
   getRendition,
   rendition,
@@ -654,7 +650,6 @@ defineExpose({
   currentHref,
   setLocation,
   epubRef,
-  TocComponent,
   // Annotation related
   savedAnnotations,
   goToAnnotation,
@@ -663,112 +658,6 @@ defineExpose({
   toggleAnnotationsPanel
 });
 </script>
-
-<style>
-/* TOC area styles */
-.toc-area {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  z-index: 10;
-  width: 256px;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  padding: 6px 0;
-  background-color: var(--background-color);
-  border-right: 1px solid var(--divider-color);
-  box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
-}
-
-.toc-area::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
-}
-
-.toc-area::-webkit-scrollbar-thumb:vertical {
-  height: 5px;
-  background-color: rgba(0, 0, 0, 0.1);
-  border-radius: 0.5rem;
-}
-
-.toc-area .toc-area-button {
-  user-select: none;
-  appearance: none;
-  background: none;
-  border: none;
-  display: block;
-  font-family: sans-serif;
-  width: 100%;
-  font-size: 0.9em;
-  text-align: left;
-  padding: 0.9em 1em;
-  border-bottom: 1px solid var(--divider-color);
-  color: var(--text-color);
-  box-sizing: border-box;
-  outline: none;
-  cursor: pointer;
-  position: relative;
-}
-
-.toc-area .toc-area-button:hover {
-  background: rgba(0, 0, 0, 0.05);
-}
-
-.toc-area .toc-area-button:active {
-  background: rgba(0, 0, 0, 0.1);
-}
-
-.toc-area .active {
-  border-left: 3px solid var(--accent-color);
-}
-
-.toc-area .toc-area-button .expansion {
-  cursor: pointer;
-  transform: translateY(-50%);
-  top: 50%;
-  right: 12px;
-  position: absolute;
-  width: 10px;
-  background-color: #a2a5b4;
-  transition: top 0.3s ease-in-out;
-}
-
-.toc-area .toc-area-button .expansion::after,
-.toc-area .toc-area-button .expansion::before {
-  content: "";
-  position: absolute;
-  width: 6px;
-  height: 2px;
-  background-color: currentcolor;
-  border-radius: 2px;
-  transition: transform 0.3s ease-in-out, top 0.3s ease-in-out;
-}
-
-.toc-area .toc-area-button .expansion::before {
-  transform: rotate(-45deg) translateX(2.5px);
-}
-.toc-area .toc-area-button .open::before {
-  transform: rotate(45deg) translateX(2.5px);
-}
-.toc-area .toc-area-button .expansion::after {
-  transform: rotate(45deg) translateX(-2.5px);
-}
-.toc-area .toc-area-button .open::after {
-  transform: rotate(-45deg) translateX(-2.5px);
-}
-
-/* TOC background overlay */
-.toc-background {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-color: rgba(0, 0, 0, 0.3);
-  z-index: 5;
-}
-</style>
 
 <style scoped>
 .reader-container {
