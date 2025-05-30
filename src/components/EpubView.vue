@@ -32,7 +32,8 @@ import {
   swipListener,
   wheelListener,
   keyListener,
-  selectListener
+  selectListener,
+  touchListener
 } from '../utils/listeners/listener'
 
 interface Props {
@@ -214,45 +215,54 @@ const registerEvents = () => {
   if (rendition) {
     rendition.on('rendered', (section, iframe) => {
       // Focus the iframe
-      iframe?.iframe?.contentWindow.focus()
+      iframe?.iframe?.contentWindow.focus();
       
       // Register interaction listeners
       if (!epubOptions?.flow?.includes('scrolled')) {
-        wheelListener(iframe.document, flipPage)
+        wheelListener(iframe.document, flipPage);
       }
-      swipListener(iframe.document, flipPage)
-      keyListener(iframe.document, flipPage)
       
-      // Register your custom selection listener if toggleBubble is provided
-      if (toggleBubble) {
-        selectListener(iframe.document, rendition, toggleBubble)
-      } else if (handleTextSelected) {
-        // If no toggleBubble but handleTextSelected exists, use the built-in selection event
-        rendition.on('selected', handleTextSelected)
-      }
+      // Use the unified touch handler instead of separate listeners
+      touchListener(
+        iframe.document, 
+        rendition, 
+        flipPage,  // Navigation function 
+        toggleBubble || handleTextSelected // Selection function
+      );
+      
+      // Register regular click listener for non-touch interactions
+      clickListener(iframe.document, rendition, flipPage);
+      
+      // If no unified handler, fall back to separate listeners
+      // swipListener(iframe.document, flipPage);
+      // if (toggleBubble) {
+      //   selectListener(iframe.document, rendition, toggleBubble);
+      // } else if (handleTextSelected) {
+      //   rendition.on('selected', handleTextSelected);
+      // }
       
       // Mark first content as displayed for location restoration
       if (!loadingState.firstContentDisplayed) {
-        loadingState.firstContentDisplayed = true
+        loadingState.firstContentDisplayed = true;
       }
-    })
+    });
     
-    // Location change tracking
-    rendition.on('locationChanged', onLocationChange)
+    // Other event handlers remain the same
+    rendition.on('locationChanged', onLocationChange);
     
-    rendition.on('relocated', (location: any) => {
-    //  console.log('Book relocated to:', location)
-    })
+    rendition.on('relocated', (location) => {
+      console.log('Book relocated to:', location);
+    });
     
-    rendition.on('displayError', (err: any) => {
-      console.error('Display error:', err)
-    })
+    rendition.on('displayError', (err) => {
+      console.error('Display error:', err);
+    });
     
     if (handleKeyPress) {
-      rendition.on('keypress', handleKeyPress)
+      rendition.on('keypress', handleKeyPress);
     }
   }
-}
+};
 
 // Function to apply saved location
 const applyPendingLocation = () => {

@@ -3,10 +3,12 @@ import keyListener from './key'
 import wheelListener from './wheel'
 import swipListener from './swip'
 import selectListener from './select'
+import touchListener from './touch'
 export {
   clickListener,
   keyListener,
   wheelListener,
   swipListener,
   selectListener,
+  touchListener
 }
