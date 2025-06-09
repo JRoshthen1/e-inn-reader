@@ -29,7 +29,7 @@ import ePub from 'epubjs'
 import type { Book, Rendition, Contents } from 'epubjs'
 import {
   clickListener,
-  swipListener,
+//  swipListener,
   wheelListener,
   keyListener,
   selectListener
@@ -40,7 +40,6 @@ interface Props {
   location?: any // Current Page number | string | Rendition['location']['start']
   tocChanged?: (toc: Book['navigation']['toc']) => void
   getRendition?: (rendition: Rendition) => void
-  handleTextSelected?: (cfiRange: string, contents: Contents) => void
   handleKeyPress?: () => void
   toggleBubble?: (type: string, rect?: any, text?: string, cfiRange?: string) => void // For custom selection
   epubInitOptions?: Book['settings']
@@ -55,7 +54,6 @@ const props = withDefaults(defineProps<Props>(), {
 const {
   tocChanged,
   getRendition,
-  handleTextSelected,
   handleKeyPress,
   toggleBubble,
   epubInitOptions,
@@ -220,17 +218,10 @@ const registerEvents = () => {
       if (!epubOptions?.flow?.includes('scrolled')) {
         wheelListener(iframe.document, flipPage)
       }
-      swipListener(iframe.document, flipPage)
-      keyListener(iframe.document, flipPage)
-      
-      // Register your custom selection listener if toggleBubble is provided
-      if (toggleBubble) {
-        selectListener(iframe.document, rendition, toggleBubble)
-      } else if (handleTextSelected) {
-        // If no toggleBubble but handleTextSelected exists, use the built-in selection event
-        rendition.on('selected', handleTextSelected)
-      }
-      
+      //swipListener(iframe.document, flipPage)
+      keyListener(iframe.document, flipPage)      
+      selectListener(iframe.document, rendition, toggleBubble)
+
       // Mark first content as displayed for location restoration
       if (!loadingState.firstContentDisplayed) {
         loadingState.firstContentDisplayed = true
@@ -370,6 +361,7 @@ defineExpose({
   user-select: none;
   appearance: none;
   font-weight: bold;
+  touch-action: manipulation;
 }
 
 .arrow:hover {

@@ -40,6 +40,7 @@ export default {
   position: absolute;
   top: 6px;
   right: 6px;
+  touch-action: manipulation;
 }
 
 .styles-button > div {

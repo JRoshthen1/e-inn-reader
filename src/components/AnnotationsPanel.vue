@@ -166,7 +166,7 @@ const truncateText = (text: string, maxLength: number): string => {
 
 .annotation-actions {
   display: flex;
-  gap: 0.5rem;
+  justify-content: space-between;
   margin-top: 0.5rem;
 }
 

@@ -1,7 +1,7 @@
 /**
  * @param {Document} document - The document object to add event
  * @param {Object} rendition - The EPUBJS rendition
- * @param {Function} fb - The listener function
+ * @param {Function} fn - The listener function
  */
 export default function selectListener(document, rendition, fn) {
   document.addEventListener('mousedown', () => {

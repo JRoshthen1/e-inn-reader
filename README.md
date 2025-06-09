@@ -1,5 +1,7 @@
 # E-inn
 
+[Pre-release](https://jroshthen1.github.io/e-inn-reader/)
+
 E-inn is a basic EPUB reader supporting remote API imports and local file uploads. Books are stored in IndexedDB; settings and reading progress are retained via localStorage. Built as a single-page application with Vue.js, Vue Router, and epub.js for rendering. No accounts, sync, or advanced features, serves static assets. Minimal UI, lightweight, customizable interface.
 
 ## Running 

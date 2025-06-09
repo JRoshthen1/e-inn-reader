@@ -24,7 +24,9 @@
       <AnnotationsButton 
         :is-open="showAnnotationsPanel" 
         :count="savedAnnotations.length"
-        @toggle="toggleAnnotationsPanel" 
+        :has-selection="hasTextSelection"
+        @toggle="toggleAnnotationsPanel"
+        @createFromSelection="createAnnotationFromSelection"
       />
 
       <div v-if="loading" class="loading">{{ t("reader.loading") }}</div>
@@ -104,9 +106,10 @@ import AnnotationModal from "../components/AnnotationModal.vue";
 import AnnotationsButton from "../components/AnnotationsButton.vue";
 import TocComponent from "../components/TocComponent.vue";
 import { useStyles } from "../composables/useStyles";
+import { useAnnotations } from "../composables/useAnnotations";
 import { loadBookFromIndexedDB } from "../utils/utils";
 import type { EpubFile } from "../types/epubFile";
-import type { Annotation, PendingAnnotation, AnnotationFormData } from "../types/annotations";
+import type { AnnotationFormData } from "../types/annotations";
 
 // Import epub.js types
 import type Rendition from 'epubjs/types/rendition';
@@ -147,22 +150,6 @@ const showToc = ref<boolean>(true);
 const epubRef = ref<InstanceType<typeof EpubView> | null>(null);
 const currentHref = ref<string | number | null>(null);
 
-const selectionBubble = reactive({
-  visible: false,
-  position: { left: '0px', top: '0px', width: '0px', height: '0px' },
-  selectedText: '',
-  cfiRange: ''
-});
-
-// Annotation state
-const savedAnnotations = ref<Annotation[]>([]);
-const pendingAnnotation = ref<PendingAnnotation | null>(null);
-const showAnnotationModal = ref<boolean>(false);
-const showAnnotationsPanel = ref<boolean>(false);
-const annotationName = ref<string>('');
-const annotationNote = ref<string>('');
-const editingAnnotation = ref<Annotation | null>(null);
-
 // TOC related state
 const bookState = reactive({
   toc: [] as Array<ExtendedNavItem>,
@@ -176,6 +163,28 @@ const {
   fontFamily, fontSize, stylesModalOpen,
   toggleStylesModal, rendition, setRendition,
 } = useStyles();
+
+// Annotations composable
+const {
+  savedAnnotations,
+  pendingAnnotation,
+  showAnnotationModal,
+  showAnnotationsPanel,
+  annotationName,
+  annotationNote,
+  editingAnnotation,
+  hasTextSelection,
+  loadAnnotations,
+  applyAnnotationsToView,
+  toggleSelectionBubble,
+  handleAnnotationSave,
+  closeAnnotationModal,
+  goToAnnotation,
+  editAnnotation,
+  deleteAnnotation,
+  toggleAnnotationsPanel,
+  createAnnotationFromSelection,
+} = useAnnotations(rendition, currentHref, accentColor);
 
 const BookProgressManager = {
   saveProgress(bookId: string, cfi: string, extraData = {}) {
@@ -203,7 +212,6 @@ const BookProgressManager = {
       if (!data) return null;
       
       const parsed = JSON.parse(data);
-      //console.log(`Progress loaded for book ${bookId}:`, parsed);
       return parsed;
     } catch (error) {
       console.error('Error loading book progress:', error);
@@ -214,38 +222,6 @@ const BookProgressManager = {
   clearProgress(bookId: string) {
     const progressKey = `book-progress-${bookId}`;
     localStorage.removeItem(progressKey);
-  }
-};
-
-// The custom selection bubble toggle function to pass to EpubView
-const toggleSelectionBubble = (type, rect, text, cfiRange) => {
-  if (type === 'selected' && text && text.length > 0) {
-    selectionBubble.visible = true;
-    selectionBubble.position = rect;
-    selectionBubble.selectedText = text;
-    selectionBubble.cfiRange = cfiRange;
-    
-    // Create pending annotation to be used when the user wants to save
-    pendingAnnotation.value = {
-      cfiRange,
-      text,
-      contents: rendition.value.getContents()[0]
-    };
-    
-    // Show annotation modal directly
-    showAnnotationModal.value = true;
-    
-    // Clear any selection after capturing it
-    if (rendition.value) {
-      const contents = rendition.value.getContents();
-      contents.forEach(content => {
-        if (content.window && content.window.getSelection) {
-          content.window.getSelection()?.removeAllRanges();
-        }
-      });
-    }
-  } else if (type === 'cleared') {
-    selectionBubble.visible = false;
   }
 };
 
@@ -276,10 +252,10 @@ const loadBook = async (): Promise<void> => {
     const progress = BookProgressManager.loadProgress(bookId);
     if (progress && progress.cfi) {
       location.value = progress.cfi;
-      //console.log("Setting initial location from localStorage:", location.value);
     }
 
-    loadAnnotations();
+    // Load annotations
+    loadAnnotations(bookId);
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     console.error("Error loading book:", err);
@@ -291,10 +267,8 @@ const loadBook = async (): Promise<void> => {
 
 // Handle location changes
 const locationChange = (epubcifi: string): void => {
-  // Skip saving the location on the first render to prevent
-  // overriding our saved location
+  // Skip saving the location on the first render
   if (!firstRenderDone.value) {
-    //console.log("## first render");
     firstRenderDone.value = true;
     return;
   }
@@ -311,19 +285,30 @@ const locationChange = (epubcifi: string): void => {
   }
 };
 
-const getRendition = (renditionObj: Rendition): void => {
-  setRendition(renditionObj);
+const getRendition = (rendition: Rendition): void => {
+  setRendition(rendition);
 
-  renditionObj.on("relocated", (location: RelocatedEvent) => {
+  rendition.on("relocated", (location: RelocatedEvent) => {
     currentHref.value = location.start.href;
   });
 
-  nextTick(() => {
-    applyAnnotationsToView();
+  applyAnnotationsToView();
+
+  let annotationsApplied = true;
+  
+  rendition.on("rendered", async () => {
+
+  if (!annotationsApplied) {
+    try {
+      annotationsApplied = true;
+    } catch (error) {
+      console.error("An error occurred while applying annotations:", error);
+    }
+  }
   });
 
   // Get book metadata
-  const book: Book = renditionObj.book;
+  const book: Book = rendition.book;
   book.ready.then(() => {
     const meta = book.packaging?.metadata;
     if (!bookTitle.value && meta?.title) {
@@ -333,194 +318,10 @@ const getRendition = (renditionObj: Rendition): void => {
   });
 };
 
-// Annotation storage functions
-const getAnnotationStorageKey = (bookId: string): string => {
-  return `epub-annotations-${bookId}`;
-};
-
-const loadAnnotations = (): void => {
-  try {
-    const bookId = route.params.bookId as string;
-    const storageKey = getAnnotationStorageKey(bookId);
-    const stored = localStorage.getItem(storageKey);
-    
-    if (stored) {
-      const parsedAnnotations: Annotation[] = JSON.parse(stored);
-      savedAnnotations.value = parsedAnnotations.sort((a, b) => b.createdAt - a.createdAt);
-    }
-  } catch (error) {
-    console.error('Error loading annotations:', error);
-    savedAnnotations.value = [];
-  }
-};
-
-const saveAnnotationsToStorage = (): void => {
-  try {
-    const bookId = route.params.bookId as string;
-    const storageKey = getAnnotationStorageKey(bookId);
-    localStorage.setItem(storageKey, JSON.stringify(savedAnnotations.value));
-  } catch (error) {
-    console.error('Error saving annotations:', error);
-  }
-};
-
-// Apply annotations to view
-const applyAnnotationsToView = async (): Promise<void> => {
-  if (!rendition.value || savedAnnotations.value.length === 0) return;
-
-  try {
-    await nextTick();
-    setTimeout(() => {
-      savedAnnotations.value.forEach(annotation => {
-        try {
-          rendition.value?.annotations.highlight(
-            annotation.cfiRange,
-            { 
-              id: annotation.id,
-              name: annotation.name,
-              note: annotation.note 
-            },
-            undefined,
-            'saved-annotation',
-            {
-              fill: accentColor.value,
-              'fill-opacity': '0.4',
-              'mix-blend-mode': 'multiply',
-              stroke: accentColor.value,
-              'stroke-width': '1px'
-            }
-          );
-        } catch (error) {
-          console.warn('Failed to apply annotation:', annotation.id, error);
-        }
-      });
-    }, 500);
-  } catch (error) {
-    console.error('Error applying annotations:', error);
-  }
-};
-
-// Handle annotation save from modal
-const handleAnnotationSave = (formData: AnnotationFormData): void => {
-  if (!pendingAnnotation.value) return;
-  
-  try {
-    const bookId = route.params.bookId as string;
-    const now = Date.now();
-
-    if (editingAnnotation.value) {
-      // Update existing annotation
-      const index = savedAnnotations.value.findIndex(a => a.id === editingAnnotation.value!.id);
-      if (index !== -1) {
-        savedAnnotations.value[index] = {
-          ...editingAnnotation.value,
-          name: formData.name,
-          note: formData.note || undefined,
-          updatedAt: now
-        };
-      }
-    } else {
-      // Create new annotation
-      const annotation: Annotation = {
-        id: generateAnnotationId(),
-        bookId,
-        cfiRange: pendingAnnotation.value.cfiRange,
-        text: pendingAnnotation.value.text,
-        name: formData.name,
-        note: formData.note || undefined,
-        createdAt: now,
-        updatedAt: now,
-        chapter: currentHref.value?.toString()
-      };
-
-      savedAnnotations.value.unshift(annotation);
-      
-      // Add visual highlight
-      rendition.value?.annotations.highlight(
-        annotation.cfiRange,
-        { 
-          id: annotation.id,
-          name: annotation.name,
-          note: annotation.note 
-        },
-        undefined,
-        'saved-annotation',
-        {
-          fill: accentColor.value,
-          'fill-opacity': '0.4',
-          'mix-blend-mode': 'multiply',
-          stroke: accentColor.value,
-          'stroke-width': '1px'
-        }
-      );
-    }
-    
-    saveAnnotationsToStorage();
-    closeAnnotationModal();
-    
-    // Show the annotations panel after creating a new annotation
-    if (!editingAnnotation.value) {
-      showAnnotationsPanel.value = true;
-    }
-  } catch (error) {
-    console.error('Error saving annotation:', error);
-  }
-};
-
-// Close annotation modal
-const closeAnnotationModal = (): void => {
-  showAnnotationModal.value = false;
-  pendingAnnotation.value = null;
-  annotationName.value = '';
-  annotationNote.value = '';
-  editingAnnotation.value = null;
-};
-
-// Generate annotation ID
-const generateAnnotationId = (): string => {
-  return `annotation-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-};
-
-// Go to annotation
-const goToAnnotation = (cfiRange: string): void => {
-  if (rendition.value) {
-    rendition.value.display(cfiRange);
-  }
-};
-
-// Edit annotation
-const editAnnotation = (annotation: Annotation): void => {
-  editingAnnotation.value = annotation;
-  annotationName.value = annotation.name;
-  annotationNote.value = annotation.note || '';
-  
-  // Need to set a dummy pending annotation to make the modal work
-  pendingAnnotation.value = {
-    cfiRange: annotation.cfiRange,
-    text: annotation.text,
-    contents: null as any // This is fine as we're just editing
-  };
-  
-  showAnnotationModal.value = true;
-};
-
-// Delete annotation
-const deleteAnnotation = (annotationId: string): void => {
-  if (confirm('Are you sure you want to delete this annotation?')) {
-    const index = savedAnnotations.value.findIndex(a => a.id === annotationId);
-    if (index !== -1) {
-      const annotation = savedAnnotations.value[index];
-      
-      try {
-        rendition.value?.annotations.remove(annotation.cfiRange, 'highlight');
-      } catch (error) {
-        console.warn('Could not remove highlight:', error);
-      }
-      
-      savedAnnotations.value.splice(index, 1);
-      saveAnnotationsToStorage();
-    }
-  }
+// Wrapper for delete annotation to include bookId
+const deleteAnnotationWrapper = (annotationId: string): void => {
+  const bookId = route.params.bookId as string;
+  deleteAnnotation(annotationId, bookId);
 };
 
 // Toggle TOC panel
@@ -531,11 +332,6 @@ const toggleToc = (): void => {
   } else {
     window.removeEventListener('keydown', handleKeyDown);
   }
-};
-
-// Toggle annotations panel
-const toggleAnnotationsPanel = () => {
-  showAnnotationsPanel.value = !showAnnotationsPanel.value;
 };
 
 // Handle key events
@@ -583,36 +379,8 @@ const setLocation = (
   expandedToc.value = !close;
 };
 
-const debugStoredLocation = () => {
-  const bookId = route.params.bookId as string;
-  const progressKey = `book-progress-${bookId}`;
-  const savedLocation = localStorage.getItem(progressKey);
-  
-  console.log('================ DEBUG INFO ================');
-  console.log('Book ID:', bookId);
-  console.log('Progress key:', progressKey);
-  console.log('Saved location in localStorage:', savedLocation);
-  
-  // Check if the location format is valid
-  if (savedLocation) {
-    try {
-      const parsed = JSON.parse(savedLocation);
-      console.log('Parsed location:', parsed);
-      console.log('Is valid CFI format:', typeof parsed.cfi === 'string' && parsed.cfi.includes('epubcfi'));
-    } catch (e) {
-      console.log('Raw location string:', savedLocation);
-      console.log('Is valid CFI format:', savedLocation.includes('epubcfi'));
-    }
-  }
-  
-  console.log('=========================================');
-};
-
 onMounted(() => {
- // debugStoredLocation();
   loadBook();
-  
-  // Add keyboard shortcuts
   window.addEventListener('keydown', handleKeyDown);
 });
 
@@ -653,9 +421,11 @@ defineExpose({
   // Annotation related
   savedAnnotations,
   goToAnnotation,
-  editAnnotation,
-  deleteAnnotation,
-  toggleAnnotationsPanel
+  editAnnotation: editAnnotation,
+  deleteAnnotation: deleteAnnotationWrapper,
+  toggleAnnotationsPanel,
+  toggleSelectionBubble,
+  createAnnotationFromSelection
 });
 </script>
 
@@ -702,6 +472,7 @@ defineExpose({
   top: 6px;
   left: 6px;
   z-index: 10;
+  touch-action: manipulation;
 }
 
 .toc-button-bar {
@@ -739,6 +510,7 @@ defineExpose({
   top: 10px;
   white-space: nowrap;
   z-index: 5;
+  touch-action: manipulation;
 }
 
 .reader-view {

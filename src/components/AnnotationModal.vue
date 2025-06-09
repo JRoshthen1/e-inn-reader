@@ -48,7 +48,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted } from 'vue';
+import { ref, watch, nextTick } from 'vue';
 import { useI18n } from '../i18n/usei18n';
 
 const { t } = useI18n();
